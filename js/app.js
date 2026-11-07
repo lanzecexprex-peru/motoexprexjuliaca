@@ -41,8 +41,7 @@
     n.className = 'notice' + (bad ? ' bad' : '');
     n.hidden = false;
     clearTimeout(noticeTimer);
-    if (!bad) noticeTimer = setTimeout(function () { n.hidden = true; }, 8000);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    noticeTimer = setTimeout(function () { n.hidden = true; }, bad ? 12000 : 8000);
   }
 
   function friendly(e) {
@@ -61,7 +60,7 @@
     var b = $('button[type=submit]', form);
     if (b) b.disabled = true;
     return Promise.resolve().then(fn).catch(function (e) { notice(friendly(e), true); })
-      .then(function () { if (b) b.disabled = false; });
+      .then(function () { if (b) b.disabled = !!form.querySelector('#pendingNote'); });
   }
 
   async function rpc(name, args) {
@@ -413,6 +412,12 @@
       var byS = {};
       (of.data || []).forEach(function (o) { (byS[o.service_id] = byS[o.service_id] || []).push(o); });
       await loadContacts(r.data);
+      var pending = r.data.some(function (s) { return s.status === 'requested' || s.status === 'countered'; });
+      var sbtn = $('button[type=submit]', f), pn = $('#pendingNote');
+      if (sbtn) sbtn.disabled = pending;
+      if (pending && !pn && sbtn) {
+        sbtn.insertAdjacentHTML('beforebegin', '<p id="pendingNote" class="note">Ya tienes una solicitud en espera. Podrás pedir otro servicio cuando un transportista la acepte o la canceles.</p>');
+      } else if (!pending && pn) pn.remove();
       var sig = JSON.stringify(r.data.map(function (s) { return [s.id, s.status, s.final_price]; })) +
         JSON.stringify((of.data || []).map(function (o) { return [o.offer_id, o.price]; })) + contacts.size;
       if (sig === lastSig && !force) return;
@@ -424,6 +429,7 @@
     f.addEventListener('submit', function (e) {
       e.preventDefault();
       withBusy(f, async function () {
+        if ($('#pendingNote')) throw new Error('Ya tienes una solicitud en espera. Acéptala o cancélala antes de pedir otra.');
         var d = new FormData(f);
         var price = parseFloat(d.get('proposed_price'));
         if (!(price >= 0.5 && price <= 500)) throw new Error('El precio debe estar entre S/ 0.50 y S/ 500.');
@@ -436,7 +442,7 @@
         var r = await sb.from('services').insert(row);
         if (r.error) {
           if (/row-level security/i.test(r.error.message))
-            throw new Error('No se pudo enviar: necesitas una suscripción activa y máximo 5 servicios abiertos a la vez.');
+            throw new Error('No se pudo enviar: necesitas una suscripción activa y no tener otra solicitud en espera (acéptala o cancélala primero).');
           throw r.error;
         }
         notice('Solicitud enviada. Espera la respuesta de un transportista.');
